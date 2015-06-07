@@ -1,7 +1,5 @@
 package momijikawa.exercisezmq
 
-
-
 object Main extends App {
   import akka.actor._
   import akka.zeromq._
@@ -14,12 +12,14 @@ object Main extends App {
 
   class Listener(sessioner: ActorRef) extends Actor with ActorLogging {
     import log.{debug, warning}
+
     def receive: Receive = {
       case m: ZMQMessage =>
         debug("ZMQMessage: " + m.frame(0).decodeString("UTF-8"))
         sessioner ! ('rep, m)
 
       case Connecting => debug("Connecting..")
+
       case Closed => debug("Closed")
 
       case unknown => warning("Unknown message received: " + unknown)
@@ -31,33 +31,36 @@ object Main extends App {
     var sock: ActorRef = null
     val mapping = collection.mutable.Map[Int, ActorRef]()
     implicit val execContext: ExecutionContext = context.dispatcher
+
     def receive = inactive
+
     def inactive: Receive = {
       case ('defsock, a: ActorRef) =>
         debug("actor has been activated")
         sock = a
         context.become(active)
+
       case unknown => log.error("Unknown message received: " + unknown)
     }
+
     def active: Receive = {
-      case x: Seq[ByteString] =>
-        import scala.util.Random
-        debug("sending message, recipient is " + sender.toString())
-        val randInt = Random.nextInt()
-        debug("seq no " + randInt)
-        mapping += randInt -> sender
-        debug("now mapping is " + mapping.toString())
-        val sendingFrames: Seq[ByteString] = ByteString(randInt.toString) +: x
+      case xs: Seq[ByteString] =>
+        val sessionNumber = scala.util.Random.nextInt()
+        mapping += sessionNumber -> sender
+        val sendingFrames: Seq[ByteString] = ByteString(sessionNumber.toString) +: xs
         sock ! ZMQMessage(sendingFrames)
+        debug(s"sending message, recipient is $sender")
+        debug(s"session no: $sessionNumber")
+        debug(s"now mapping is $mapping")
 
       case ('rep, m: ZMQMessage) =>
         debug("reply incoming")
-        val key = m.frame(0).decodeString("UTF-8").toInt
+        val key = m.frames.head.decodeString("UTF-8").toInt
         if(mapping.contains(key)) {
           val recipient = mapping(key)
-          debug("recipient found: " + recipient.toString())
           mapping -= key
           recipient ! m.frames.tail
+          debug("recipient found: " + recipient.toString())
         } else {
           warning("no recipient matches: " + m.frame(0))
           debug("now mapping is " + mapping.toString())
